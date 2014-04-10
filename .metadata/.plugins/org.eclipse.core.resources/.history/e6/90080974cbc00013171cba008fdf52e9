@@ -1,0 +1,421 @@
+//----------------------------------------------------------------------------- 
+// Sky Imager App
+// Developed by: Team Cache Money
+//               Andrew Fruge'
+//				 Brennen DiRenzo
+//-----------------------------------------------------------------------------
+
+package com.example.skyimagerhoneybadgers;
+
+/*import ioio.lib.api.AnalogInput;
+import ioio.lib.api.IOIO;
+import ioio.lib.api.IOIOFactory;
+import ioio.lib.api.exception.ConnectionLostException;
+import ioio.lib.api.exception.IncompatibilityException;*/
+
+import java.io.BufferedInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.net.Socket;
+import java.net.UnknownHostException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Timer;
+import java.util.TimerTask;
+
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
+import android.hardware.Camera;
+import android.hardware.Camera.PictureCallback;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
+import android.os.Bundle;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.PowerManager;
+import android.text.format.Time;
+import android.util.Log;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
+import android.view.View;
+import android.view.Window;
+import android.view.WindowManager;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.TextView;
+import android.widget.Toast;
+
+public class MainActivity extends Activity implements
+		SurfaceHolder.Callback {
+	private final String TAG = "Camera";
+	private Camera mCamera;
+	private SurfaceView surfaceView;
+	private SurfaceView dummy;
+	private EditText ipAddrField;
+	private SurfaceHolder surfaceHolder;
+	private Button takeButton;
+	private TextView display0_;
+	public LocationManager locmgr = null;
+	public PowerManager powerStateMgr = null;
+	public PowerManager.WakeLock wakeScreen = null;
+	String geotext = "";
+	Context topContext = null;
+	PhotoHandler handler;
+	TimerTask scanTask;
+	public View mView;
+	public boolean showEnd = false;
+	Timer timeout = new Timer();
+	public String ipAddress = null;
+	public int batchNum;
+	private int SEC_BETWEEN_PIX = 30;
+	private int SEC_BETWEEN_IOIO = 30;
+	private int SEC_BEFORE_PIX = 30;
+	private int SEC_BEFORE_IOIO = 15;
+	//public IOIO ioio;
+	public float ioioData;
+	Handler ioioHandler = new Handler();
+	private AlarmManagerBroadcastReciever alarm;
+
+	// On Create Routine------------------------------------------------------
+	// Precondition: N/A
+	// Postcondition: GUI is initialized
+	@Override
+	protected void onCreate(Bundle savedInstanceState) {
+		super.onCreate(savedInstanceState);
+		topContext = this;
+		/*alarm = new AlarmManagerBroadcastReceiver();
+		alarm.SetAlarm(topContext);
+		*/
+		requestWindowFeature(Window.FEATURE_NO_TITLE);
+		setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+		getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+		setContentView(R.layout.main);
+		locmgr = (LocationManager) this.getSystemService(Context.LOCATION_SERVICE);
+		if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_FRONT)) {
+			Toast.makeText(this, "No front camera on this device", Toast.LENGTH_LONG).show();
+		}
+		powerStateMgr = (PowerManager) getSystemService(Context.POWER_SERVICE);
+		takeButton = (Button) findViewById(R.id.take);
+		surfaceView = (SurfaceView) findViewById(R.id.preview);
+		ipAddrField = (EditText) findViewById(R.id.editText1);
+		dummy = new SurfaceView(this);
+		display0_ = (TextView) findViewById(R.id.displayText0);
+		surfaceHolder = surfaceView.getHolder();
+		surfaceHolder.addCallback(this);
+		
+		surfaceHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
+		locmgr.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 5, 0, onLocationChange);
+		FileManagerCSTM oldFiles = new FileManagerCSTM(this);
+		oldFiles.clearPicMem("/storage/sdcard0/Pictures/Sky Test Pics/");
+		//ioio = IOIOFactory.create();
+		batchNum = 0;
+	}
+	// --- End On Create Routine------------------------------------------------
+
+	// ---On Begin Click Routine------------------------------------------------
+	// -Precondition: GUI and camera have been initialized || App is running
+	// -Postcondition: App begins || App Ends
+	public void onClick(View view) {
+		if (!showEnd) {
+			showEnd = true;
+			takeButton.setText("Stop & Exit");
+			ipAddress = ipAddrField.getText().toString();
+			mView = view;
+			locmgr.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 5, 0, onLocationChange);
+			while(!timeIs30());
+			Log.d("IOIOService", "REFRESH 1");
+			//runIOIOLoop();
+			runPicLoop();	
+		} else {
+			timeout.cancel();
+			finish();
+		}
+	}
+	// ---End On Begin Click----------------------------------------------------
+	
+	// ---Wait for 30sec Loop---------------------------------------------------
+	// -Precondition: Picture taking loop has been set to run
+	// -Postcondition: Stall until second timestamp is 00||30, server integ.
+	public boolean timeIs30(){
+		Time now = new Time();
+		now.setToNow();
+		int currTime = now.second;
+		if((currTime == 0) || (currTime == 30) || (currTime >= 60)){
+			return true;
+		}
+		return false;
+	}
+	//--------------------------------------------------------------------------	
+	
+	// ---Run Picture Taking Loop-----------------------------------------------
+	// -Precondition: Begin button has been activated
+	// -Postcondition: GPS Location is determined, picture loop begins
+	public void runPicLoop() {
+		wakeScreen = powerStateMgr.newWakeLock(PowerManager.FULL_WAKE_LOCK, TAG);
+		//wakeScreen.acquire();
+		timeout.scheduleAtFixedRate(new TimerTask() {
+			public void run() {
+				Log.d("IOIOService", "Taking PIX");
+				wakeScreen.acquire();
+				takePhoto(mView);
+				wakeScreen.release();
+				batchNum++;
+			}
+		}, SEC_BEFORE_PIX*1000,SEC_BETWEEN_PIX*1000);
+	}
+	// ---End Run Picture Taking Loop-------------------------------------------
+
+	// ---Run IOIO Data Loop----------------------------------------------------
+	// -Precondition: Begin button has been activated
+	// -Postcondition: IOIO Loop runs and returns Volt. from pin 42
+	/*public void runIOIOLoop() {
+		try{
+			ioio.waitForConnect();
+		}
+		catch (ConnectionLostException e) {
+			Log.d("IOIOService","CONN LOST NONSENSE");
+			e.printStackTrace();
+		} catch (IncompatibilityException e) {
+			Log.d("IOIOService","ICOMPATIBILITY NONSENSE");
+			e.printStackTrace();
+		} 
+		timeout.scheduleAtFixedRate(new TimerTask() {
+			public void run() {
+				batchNum++;
+				try {
+					Log.d("IOIOService","CONNECTED HOMBRE!");
+					AnalogInput dataPin = ioio.openAnalogInput(42);
+					ioioData = dataPin.getVoltage(); //Value to be used in filename
+					dataPin.close();
+					Log.d("IOIOService","Data = "+ ioioData);
+				} catch (InterruptedException e) {
+					Log.d("IOIOService", "CANT READ DATA PIN");
+					e.printStackTrace();
+				}		  				
+				catch (ConnectionLostException e) {
+					Log.d("IOIOService", "CONN LOST 2");
+					e.printStackTrace();
+				}
+			}
+		}, SEC_BEFORE_IOIO*1000, SEC_BETWEEN_IOIO*1000);
+	}*/
+	//---End IOIO Loop-----------------------------------------------------------------------
+
+	// ---Camera Resume---------------------------------------------------------
+	// -Precondition: Camera has been designated for activation
+	// -Postcondition: Front(1) or Back(0) camera is activated
+	@Override
+	protected void onResume() {
+		super.onResume();
+		mCamera = Camera.open(0);
+		HardwareSettings hwSettings = new HardwareSettings(mCamera);
+		hwSettings.setCamParams();
+	}
+	// ---End Camera Resume-----------------------------------------------------
+
+	// ---Camera Pause----------------------------------------------------------
+	// -Precondition: Camera has been activated
+	// -Postcondition: Camera has been released, it is a shared resource
+	@Override
+	protected void onPause() {
+		super.onPause();
+		if (mCamera != null) {
+			mCamera.stopPreview();
+			mCamera.release();
+			mCamera = null;
+		}
+	}
+	// ---End Camera Pause------------------------------------------------------
+
+	// ---Take Photo Function---------------------------------------------------
+	// -Precondition: Camera has been activated
+	// -Postcondition: A picture is taken
+	public void takePhoto(View v) {
+		handler = new PhotoHandler(this,ioioData);
+		mCamera.takePicture(null, null, handler);
+	}
+	// ---End Take Photo Function-----------------------------------------------
+
+	// ---Start LocationListener------------------------------------------------
+	// -Precondition: GPS is initialized
+	// -Postcondition: New GPS coordinates
+		LocationListener onLocationChange = new LocationListener() {
+			public void onLocationChanged(Location loc) {
+				loc.getLatitude();
+				loc.getLongitude();
+				geotext = "_" + loc.getLatitude() + "_" + loc.getLongitude();//Value to be used in filename
+				
+			}
+
+			public void onProviderDisabled(String provider) {
+				// required for interface, not used
+			}
+
+			public void onProviderEnabled(String provider) {
+				// required for interface, not used
+			}
+
+			public void onStatusChanged(String provider, int status, Bundle extras) {
+				// required for interface, not used
+			}
+		};
+		// ---End Location Listener------------------------------------------------
+
+
+	//---Surface Created Routine-----------------------------------------------
+	//-Precondition: On Activity has been called
+	//-Postcondition: Camera is acquired and told where to draw
+	@Override
+	public void surfaceCreated(SurfaceHolder holder) {
+		try {
+			if (mCamera != null) {
+				mCamera.setPreviewDisplay(surfaceHolder);
+				mCamera.setDisplayOrientation(90);
+				mCamera.startPreview();
+			}
+		} catch (IOException exception) {
+			Log.e(TAG, "IOException caused by setPreviewDisplay()", exception);
+		}
+	}
+	//---End Surface Created Routine-------------------------------------------
+
+	//---Surface Destroyed Routine---------------------------------------------
+	//-Precondition: Surface has been created
+	//-Postcondition: Surface is destroyed, no more preview
+	@Override
+	public void surfaceDestroyed(SurfaceHolder holder) {
+		if (mCamera != null) {
+			mCamera.stopPreview();
+		}
+	}
+	//---End Surface Destroyed-------------------------------------------------
+
+	//---Surface Changed Routine-----------------------------------------------
+	//-Precondition: Surface has been created
+	//-Postcondition: Nothing, abstract function
+	@Override
+	public void surfaceChanged(SurfaceHolder holder, int format, int width,	int height) {
+	}
+	//---End Surface Changed Routine-------------------------------------------
+	
+//---PhotoHandler Class--------------------------------------------------------
+	class PhotoHandler implements PictureCallback {
+		int sendCounter = 0;
+		public File pictureFile;
+		public String filename;
+		private final Context context;
+		public float ioioRead;
+
+		//---PhotoHandler Initialization---------------------------------------
+		//-Precondition: We have a photo that needs to be stored and sent
+		//-Postcondition: Context is set
+		public PhotoHandler(Context context, float ioioData) {
+			this.context = context;
+			ioioRead = ioioData;
+		}
+		//---End Initialization------------------------------------------------
+
+		//---On Picture Taken Handler------------------------------------------
+		//-Precondition: A picture and camera have been specified
+		//-Postcondition: The picture is saved locally and sent to the server
+		@Override
+		public void onPictureTaken(byte[] data, Camera camera) {
+			File pictureFileDir = getDir();
+			if (!pictureFileDir.exists() && !pictureFileDir.mkdirs()) {
+				Log.d(TAG, "Can't create directory to save image.");
+				Toast.makeText(context,"Can't create directory to save image.",Toast.LENGTH_LONG).show();
+				return;
+			}
+			SimpleDateFormat dateFormat = new SimpleDateFormat("HHmmss");
+			String date = dateFormat.format(new Date());
+			String photoFileUnformatted = "1_" + date + geotext + "_" + ioioRead; //First value is phone ID, needs to be changed for each sensor
+			String photoFile = photoFileUnformatted.replace(".",",");
+			photoFile = photoFile + ".jpg";
+			
+			//For Debugging with non-static IP
+			Log.d("IPADDR","IP Address is: "+ipAddress);
+			boolean send = ipAddress.contains(".");
+			if(send)
+				Log.d("IPADDR","Valid IP...Sending File");
+			else
+				Log.d("IPADDR","NOT Valid IP...Debug Only");
+			filename = new String(pictureFileDir.getPath() + File.separator	+ photoFile);
+			pictureFile = new File(filename);
+			photoFile = photoFile + "\n";
+			try {
+				String security = new String("cachemoney\n");
+				byte[] securityBytes = new byte[(int)security.length()];
+				securityBytes = security.getBytes();
+				byte[] filenameBytes = new byte[(int)filename.length()];
+				filenameBytes = photoFile.getBytes();
+				FileOutputStream fos = new FileOutputStream(pictureFile);
+				//SECURITY
+				fos.write(securityBytes);
+				fos.write(filenameBytes);
+				fos.write(data);
+				fos.close();
+				Log.d("IPADDR",security);
+				Toast.makeText(context, "New Image saved:" + photoFile,	Toast.LENGTH_LONG).show();
+				mCamera.stopPreview();
+				mCamera.startPreview();
+				
+				if(send)
+					sendPhoto();
+					
+				Toast.makeText(context, "File SENT to server.", Toast.LENGTH_SHORT).show();
+				//Log.d("HERE", filename);
+			} catch (Exception error) {
+				Log.d(TAG,"File" + filename + "not saved: " + error.getMessage());
+				Toast.makeText(context, "Image could not be saved.",Toast.LENGTH_LONG).show();
+			}
+		}
+		//---End On Picture Taken----------------------------------------------
+		
+		//---Get File Directory Routine----------------------------------------
+		//-Precondition: A picture has been chosen to be saved
+		//-Postcondition: The filepath has been returned
+		private File getDir() {
+			File sdDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES);
+			return new File(sdDir, "Sky Test Pics");
+		}
+		//---End Get File Directory--------------------------------------------
+
+		//---Send Photo Function-----------------------------------------------
+		//-Precondition: The picture to be sent has been saved
+		//-Postcondition: The picture has been sent
+		public void sendPhoto() {
+				
+			try {
+				Socket client = new Socket(ipAddress, 5000);//IpAddress can be changed to static IP when needed
+				byte[] mybytearray = new byte[(int) pictureFile.length()]; // create a byte array to file
+				FileInputStream fileInputStream = new FileInputStream(pictureFile);
+				BufferedInputStream bufferedInputStream = new BufferedInputStream(fileInputStream);
+				bufferedInputStream.read(mybytearray, 0, mybytearray.length); // read the file
+				OutputStream outputStream = client.getOutputStream();
+				outputStream.write(mybytearray, 0, mybytearray.length); // write file to the output stream byte by byte
+				outputStream.flush();
+				bufferedInputStream.close();
+				outputStream.close();
+				client.close();
+				} catch (UnknownHostException e) {
+					e.printStackTrace();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+				sendCounter++;
+				display0_.setText(String.valueOf(sendCounter));
+				
+			}
+		}
+		//---End Send Photo----------------------------------------------------
+	
+}

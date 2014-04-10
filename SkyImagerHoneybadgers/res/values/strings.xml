@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="app_name">Sky Imager Honeybadgers</string>
+    <string name="action_settings">Settings</string>
+    <string name="hello_world">Hello world!</string>
+    <string name="ipInit">128.138.248.205</string>
+    <string name="dispText">0</string>
+    <string name="buttonInit">Begin</string>
+
+</resources>
