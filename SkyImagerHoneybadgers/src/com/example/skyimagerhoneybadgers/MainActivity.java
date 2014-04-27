@@ -7,11 +7,9 @@
 
 package com.example.skyimagerhoneybadgers;
 
-/*import ioio.lib.api.AnalogInput;
-import ioio.lib.api.IOIO;
-import ioio.lib.api.IOIOFactory;
-import ioio.lib.api.exception.ConnectionLostException;
-import ioio.lib.api.exception.IncompatibilityException;*/
+import ioio.lib.util.IOIOLooper;
+import ioio.lib.util.IOIOLooperProvider;
+import ioio.lib.util.android.IOIOAndroidApplicationHelper;
 
 import java.io.BufferedInputStream;
 import java.io.File;
@@ -42,6 +40,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.PowerManager;
+//import android.telephony.TelephonyManager;
 import android.text.format.Time;
 import android.util.Log;
 import android.view.SurfaceHolder;
@@ -55,7 +54,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 public class MainActivity extends Activity implements
-		SurfaceHolder.Callback {
+		SurfaceHolder.Callback, IOIOLooperProvider {
 	private final String TAG = "Camera";
 	private Camera mCamera;
 	private SurfaceView surfaceView;
@@ -67,7 +66,7 @@ public class MainActivity extends Activity implements
 	public LocationManager locmgr = null;
 	public PowerManager powerStateMgr = null;
 	public PowerManager.WakeLock wakeScreen = null;
-	String geotext = "";
+	String geotext = "_40.00753_-105.26249";
 	Context topContext = null;
 	PhotoHandler handler;
 	TimerTask scanTask;
@@ -77,12 +76,11 @@ public class MainActivity extends Activity implements
 	public String ipAddress = null;
 	public int batchNum;
 	private int SEC_BETWEEN_PIX = 30;
-	private int SEC_BETWEEN_IOIO = 30;
+	//private int SEC_BETWEEN_IOIO = 30;
 	private int SEC_BEFORE_PIX = 30;
-	private int SEC_BEFORE_IOIO = 15;
-	//public IOIO ioio;
-	public float ioioData;
-	Handler ioioHandler = new Handler();
+	//private int SEC_BEFORE_IOIO = 15;
+	public static float ioioData;
+	private final IOIOAndroidApplicationHelper helper_ = new IOIOAndroidApplicationHelper(this, this);
 	private AlarmManagerBroadcastReciever alarm;
 
 	// On Create Routine------------------------------------------------------
@@ -99,6 +97,7 @@ public class MainActivity extends Activity implements
 		setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
 		getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
 		setContentView(R.layout.main);
+		helper_.create();
 		locmgr = (LocationManager) this.getSystemService(Context.LOCATION_SERVICE);
 		if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_FRONT)) {
 			Toast.makeText(this, "No front camera on this device", Toast.LENGTH_LONG).show();
@@ -117,7 +116,6 @@ public class MainActivity extends Activity implements
 		locmgr.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 5, 0, onLocationChange);
 		FileManagerCSTM oldFiles = new FileManagerCSTM(this);
 		oldFiles.clearPicMem("/storage/sdcard0/Pictures/Sky Test Pics/");
-		//ioio = IOIOFactory.create();
 		batchNum = 0;
 	}
 	// --- End On Create Routine------------------------------------------------
@@ -126,18 +124,21 @@ public class MainActivity extends Activity implements
 	// -Precondition: GUI and camera have been initialized || App is running
 	// -Postcondition: App begins || App Ends
 	public void onClick(View view) {
+		wakeScreen = powerStateMgr.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, TAG);
 		if (!showEnd) {
+			wakeScreen.acquire();
 			showEnd = true;
 			takeButton.setText("Stop & Exit");
 			ipAddress = ipAddrField.getText().toString();
 			mView = view;
 			locmgr.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 5, 0, onLocationChange);
 			while(!timeIs30());
-			Log.d("IOIOService", "REFRESH 1");
+			//Log.d("IOIOService", "REFRESH 1");
 			//runIOIOLoop();
 			runPicLoop();	
 		} else {
 			timeout.cancel();
+			wakeScreen.release();
 			finish();
 		}
 	}
@@ -161,14 +162,13 @@ public class MainActivity extends Activity implements
 	// -Precondition: Begin button has been activated
 	// -Postcondition: GPS Location is determined, picture loop begins
 	public void runPicLoop() {
-		wakeScreen = powerStateMgr.newWakeLock(PowerManager.FULL_WAKE_LOCK, TAG);
+		
 		//wakeScreen.acquire();
 		timeout.scheduleAtFixedRate(new TimerTask() {
 			public void run() {
 				Log.d("IOIOService", "Taking PIX");
-				wakeScreen.acquire();
+				
 				takePhoto(mView);
-				wakeScreen.release();
 				batchNum++;
 			}
 		}, SEC_BEFORE_PIX*1000,SEC_BETWEEN_PIX*1000);
@@ -191,11 +191,10 @@ public class MainActivity extends Activity implements
 		} 
 		timeout.scheduleAtFixedRate(new TimerTask() {
 			public void run() {
-				batchNum++;
 				try {
 					Log.d("IOIOService","CONNECTED HOMBRE!");
-					AnalogInput dataPin = ioio.openAnalogInput(42);
-					ioioData = dataPin.getVoltage(); //Value to be used in filename
+					AnalogInput dataPin = ioio.openAnalogInput(46);
+					ioioData = dataPin.read()*360f; //Value to be used in filename
 					dataPin.close();
 					Log.d("IOIOService","Data = "+ ioioData);
 				} catch (InterruptedException e) {
@@ -209,6 +208,17 @@ public class MainActivity extends Activity implements
 			}
 		}, SEC_BEFORE_IOIO*1000, SEC_BETWEEN_IOIO*1000);
 	}*/
+	
+	protected IOIOLooper createIOIOLooper() 
+	{
+		return new IOIO_thread(this);				//  !!!!!!!!!!!!!!!!!   create our own IOIO thread (Looper) with a reference to this activity
+	}
+
+	@Override
+	public IOIOLooper createIOIOLooper(String connectionType, Object extra) 
+	{
+		return createIOIOLooper();
+	}
 	//---End IOIO Loop-----------------------------------------------------------------------
 
 	// ---Camera Resume---------------------------------------------------------
@@ -236,7 +246,38 @@ public class MainActivity extends Activity implements
 		}
 	}
 	// ---End Camera Pause------------------------------------------------------
+	
+	@Override
+	protected void onDestroy() 
+	{
+		helper_.destroy();
+		super.onDestroy();
+	}
 
+	@Override
+	protected void onStart() 
+	{
+		super.onStart();
+		helper_.start();
+	}
+
+	@Override
+	protected void onStop() 
+	{
+		helper_.stop();
+		super.onStop();
+	}
+
+	@Override
+	protected void onNewIntent(Intent intent) 
+	{
+		super.onNewIntent(intent);
+		if ((intent.getFlags() & Intent.FLAG_ACTIVITY_NEW_TASK) != 0) 
+		{
+			helper_.restart();
+		}
+	}
+	
 	// ---Take Photo Function---------------------------------------------------
 	// -Precondition: Camera has been activated
 	// -Postcondition: A picture is taken
@@ -335,9 +376,22 @@ public class MainActivity extends Activity implements
 				Toast.makeText(context,"Can't create directory to save image.",Toast.LENGTH_LONG).show();
 				return;
 			}
+			
+			//--------------Set sensor ID-----------
+			//TelephonyManager tManager = (TelephonyManager)MainActivity.getSystemService(Context.TELEPHONY_SERVICE);
+			//String uid = tManager.getDeviceId();
+			
+			int dev_num = 1;
+			
+			/*if(uid == "354826052927746")
+			{
+				dev_num = 1;
+			}*/
+			
+			//--------------------------------------
 			SimpleDateFormat dateFormat = new SimpleDateFormat("HHmmss");
-			String date = dateFormat.format(new Date());
-			String photoFileUnformatted = "1_" + date + geotext + "_" + ioioRead; //First value is phone ID, needs to be changed for each sensor
+			String date = dateFormat.format(new Date()); 
+			String photoFileUnformatted = dev_num + "_" + date + geotext + "_" + ioioRead; //First value is phone ID, needs to be changed for each sensor
 			String photoFile = photoFileUnformatted.replace(".",",");
 			photoFile = photoFile + ".jpg";
 			
@@ -373,7 +427,7 @@ public class MainActivity extends Activity implements
 				}
 					
 				Toast.makeText(context, "File SENT to server.", Toast.LENGTH_SHORT).show();
-				//Log.d("HERE", filename);
+				Log.d("HERE", filename);
 			} catch (Exception error) {
 				Log.d(TAG,"File" + filename + "not saved: " + error.getMessage());
 				Toast.makeText(context, "Image could not be saved.",Toast.LENGTH_LONG).show();
