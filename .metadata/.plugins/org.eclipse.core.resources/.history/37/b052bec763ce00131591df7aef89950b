@@ -40,7 +40,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.PowerManager;
-import android.telephony.TelephonyManager;
+//import android.telephony.TelephonyManager;
 import android.text.format.Time;
 import android.util.Log;
 import android.view.SurfaceHolder;
@@ -53,14 +53,10 @@ import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
-public class MainActivity extends Activity implements
-		SurfaceHolder.Callback, IOIOLooperProvider {
+public class MainActivity extends Activity implements IOIOLooperProvider {
 	private final String TAG = "Camera";
 	private Camera mCamera;
-	private SurfaceView surfaceView;
-	private SurfaceView dummy;
 	private EditText ipAddrField;
-	private SurfaceHolder surfaceHolder;
 	private Button takeButton;
 	private TextView display0_;
 	public LocationManager locmgr = null;
@@ -104,14 +100,9 @@ public class MainActivity extends Activity implements
 		}
 		powerStateMgr = (PowerManager) getSystemService(Context.POWER_SERVICE);
 		takeButton = (Button) findViewById(R.id.take);
-		surfaceView = (SurfaceView) findViewById(R.id.preview);
 		ipAddrField = (EditText) findViewById(R.id.editText1);
-		dummy = new SurfaceView(this);
 		display0_ = (TextView) findViewById(R.id.displayText0);
-		surfaceHolder = surfaceView.getHolder();
-		surfaceHolder.addCallback(this);
 		
-		surfaceHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
 		
 		locmgr.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 5, 0, onLocationChange);
 		FileManagerCSTM oldFiles = new FileManagerCSTM(this);
@@ -138,6 +129,7 @@ public class MainActivity extends Activity implements
 			runPicLoop();	
 		} else {
 			timeout.cancel();
+			
 			finish();
 		}
 	}
@@ -243,7 +235,6 @@ public class MainActivity extends Activity implements
 			mCamera.release();
 			mCamera = null;
 		}
-		wakeScreen.release();
 	}
 	// ---End Camera Pause------------------------------------------------------
 	
@@ -251,6 +242,7 @@ public class MainActivity extends Activity implements
 	protected void onDestroy() 
 	{
 		helper_.destroy();
+		wakeScreen.release();
 		super.onDestroy();
 	}
 
@@ -378,15 +370,15 @@ public class MainActivity extends Activity implements
 			}
 			
 			//--------------Set sensor ID-----------
-			TelephonyManager tManager = (TelephonyManager)context.getSystemService(MainActivity.TELEPHONY_SERVICE);
-			String uid = tManager.getDeviceId();
+			//TelephonyManager tManager = (TelephonyManager)MainActivity.getSystemService(Context.TELEPHONY_SERVICE);
+			//String uid = tManager.getDeviceId();
 			
-			int dev_num = 0;
+			int dev_num = 1;
 			
-			if(uid == "354826052927746")
+			/*if(uid == "354826052927746")
 			{
 				dev_num = 1;
-			}
+			}*/
 			
 			//--------------------------------------
 			SimpleDateFormat dateFormat = new SimpleDateFormat("HHmmss");
