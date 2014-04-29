@@ -14,17 +14,21 @@ public class IOIO_thread extends BaseIOIOLooper
 	private PwmOutput pwmOutput2_;
 	private DigitalOutput led_;
 	private boolean flash = false;
-	MainActivity the_gui;					// reference to the main activity
+	private float coolDutyCycle;
+	private float heatDutyCycle;
+	MainActivity mainact;	// reference to the main activity
+	private float batt_temp;
 
-	public IOIO_thread(MainActivity gui)
+	public IOIO_thread(MainActivity main)
 	{
-		the_gui = gui;
+		mainact = main;
 	}
 
 	@Override
 	public void setup() throws ConnectionLostException 
 	{
 		try {
+			
 			input_ = ioio_.openAnalogInput(46);
 			pwmOutput1_ = ioio_.openPwmOutput(6, 100000);
 			pwmOutput2_ = ioio_.openPwmOutput(7, 100000);
@@ -41,15 +45,28 @@ public class IOIO_thread extends BaseIOIOLooper
 	{
 		try 
 		{
-			final float reading = input_.read();
-			MainActivity.ioioData = reading*360f;
+			final float windDir = input_.read();
+			MainActivity.ioioData = windDir*360f;
 			flash = !flash;
-
-			pwmOutput1_.setDutyCycle(0.4f);
-			pwmOutput2_.setDutyCycle(0.0f);
+			batt_temp = mainact.myBatInfoReceiver.get_temp();
+			if(batt_temp >= 350.0f){
+				coolDutyCycle = 0.2f;
+				heatDutyCycle = 0.0f;
+			}
+			else if(batt_temp <= 70.0f){
+				coolDutyCycle = 0.0f;
+				heatDutyCycle = 0.2f;
+			}
+			else if(batt_temp > 75.0f && batt_temp < 340.0f){
+				coolDutyCycle = 0.0f;
+				heatDutyCycle = 0.0f;
+			}
+			
+			pwmOutput1_.setDutyCycle(java.lang.Math.min(coolDutyCycle,0.35f));
+			pwmOutput2_.setDutyCycle(java.lang.Math.min(heatDutyCycle,0.35f));
 			led_.write(flash);
 
-			Thread.sleep(100);
+			Thread.sleep(1000);
 		} catch (InterruptedException e) {
 			ioio_.disconnect();
 		} catch (ConnectionLostException e) {
